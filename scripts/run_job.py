@@ -75,9 +75,20 @@ def on_clips(job_id: str, clips: list[dict]) -> None:
         json.dump(clips, f, indent=2)
 
 
+def report_run_id(job_id: str) -> None:
+    # GITHUB_RUN_ID is a built-in env var on every Actions runner. Report it
+    # so the Worker can later cancel this exact run (workflow_dispatch's
+    # trigger call returns no run ID synchronously -- this is the only way
+    # to learn it).
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if run_id:
+        _post_with_retry(f"/api/render-jobs/{job_id}/run-id", {"run_id": run_id})
+
+
 def main() -> None:
     job_id = sys.argv[1]
     payload = json.loads(sys.argv[2])
+    report_run_id(job_id)
 
     # Any failure here -- including an import error before pipeline_steps
     # even runs -- must still reach the Worker, or the job is stuck showing
