@@ -18,6 +18,11 @@ import os
 import sys
 import time
 
+# Running as `python scripts/run_job.py` only puts scripts/ on sys.path,
+# not the repo root -- add it explicitly so `from pipeline import
+# pipeline_steps` (a sibling of scripts/, not of this file) resolves.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import requests
 
 WORKER_BASE_URL = os.environ["CLIPPER_WORKER_URL"].rstrip("/")
