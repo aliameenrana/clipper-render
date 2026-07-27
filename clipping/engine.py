@@ -197,12 +197,19 @@ def download_video(
             "progress_hooks": [hook],
         }
 
-    # Cookies from a local browser profile, to bypass YouTube's
-    # "Sign in to confirm you're not a bot" gating. Defaults to Chrome;
-    # override with YTDLP_COOKIES_BROWSER=firefox/brave/safari/etc, or
-    # unset YTDLP_COOKIES_BROWSER="" to disable.
+    # Cookies to bypass YouTube's "Sign in to confirm you're not a bot"
+    # gating. A cookie FILE takes priority (the only option on a headless
+    # CI runner with no installed browser, e.g. GitHub Actions -- see
+    # YTDLP_COOKIES_FILE in .github/workflows/render.yml). Falls back to
+    # reading a local browser profile (only meaningful on a dev machine
+    # that actually has one, e.g. this repo's local FastAPI dev setup) if
+    # no cookie file is configured. Set YTDLP_COOKIES_BROWSER="" to disable
+    # the browser fallback entirely.
+    cookies_file = os.environ.get("YTDLP_COOKIES_FILE", "")
     cookies_browser = os.environ.get("YTDLP_COOKIES_BROWSER", "chrome")
-    if cookies_browser:
+    if cookies_file and os.path.exists(cookies_file):
+        ydl_opts["cookiefile"] = cookies_file
+    elif cookies_browser:
         ydl_opts["cookiesfrombrowser"] = (cookies_browser, None, None, None)
 
     # --- Subtitle download — only supported for YouTube ---

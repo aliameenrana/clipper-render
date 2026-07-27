@@ -34,6 +34,14 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Decode yt-dlp cookies
+        env:
+          YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
+        run: |
+          if [ -n "$YTDLP_COOKIES_B64" ]; then
+            echo "$YTDLP_COOKIES_B64" | base64 -d > "$RUNNER_TEMP/youtube_cookies.txt"
+          fi
+
       - name: Run rendering pipeline
         env:
           CLIPPER_WORKER_URL: ${{ secrets.CLIPPER_WORKER_URL }}
@@ -42,7 +50,12 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YTDLP_COOKIES_BROWSER: ""
+          YTDLP_COOKIES_FILE: ${{ env.RUNNER_TEMP }}/youtube_cookies.txt
         run: python scripts/run_job.py "${{ inputs.job_id }}" '${{ inputs.payload }}'
+
+      - name: Remove decoded cookies file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/youtube_cookies.txt"
 
       - name: Upload rendered clips to R2
         if: always()
