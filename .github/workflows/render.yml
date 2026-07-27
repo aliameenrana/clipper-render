@@ -1,0 +1,56 @@
+name: Render clip job
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Job ID (matches the clipper-suggestions Worker's job record)"
+        required: true
+        type: string
+      payload:
+        description: "JSON-encoded job payload (url, clips, ratio, font_style, etc.)"
+        required: true
+        type: string
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Deno (yt-dlp JS challenge solver)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run rendering pipeline
+        env:
+          CLIPPER_WORKER_URL: ${{ secrets.CLIPPER_WORKER_URL }}
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          YTDLP_COOKIES_BROWSER: ""
+        run: python scripts/run_job.py "${{ inputs.job_id }}" '${{ inputs.payload }}'
+
+      - name: Upload rendered clips to R2
+        if: always()
+        env:
+          CLIPPER_WORKER_URL: ${{ secrets.CLIPPER_WORKER_URL }}
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+        run: python scripts/upload_clips.py "${{ inputs.job_id }}"
