@@ -79,23 +79,35 @@ def main() -> None:
     job_id = sys.argv[1]
     payload = json.loads(sys.argv[2])
 
-    settings_env = {
-        "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
-        "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
-        "PEXELS_API_KEY": os.environ.get("PEXELS_API_KEY", ""),
-    }
+    # Any failure here -- including an import error before pipeline_steps
+    # even runs -- must still reach the Worker, or the job is stuck showing
+    # "queued"/"downloading" forever with no error surfaced anywhere.
+    try:
+        settings_env = {
+            "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
+            "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
+            "PEXELS_API_KEY": os.environ.get("PEXELS_API_KEY", ""),
+        }
 
-    from pipeline import pipeline_steps
+        from pipeline import pipeline_steps
 
-    pipeline_steps.run(
-        job_id=job_id,
-        payload=payload,
-        settings_env=settings_env,
-        on_progress=lambda **event: on_progress(job_id, **event),
-        on_status=lambda status: on_status(job_id, status),
-        on_error=lambda error: on_error(job_id, error),
-        on_clips=lambda clips: on_clips(job_id, clips),
-    )
+        pipeline_steps.run(
+            job_id=job_id,
+            payload=payload,
+            settings_env=settings_env,
+            on_progress=lambda **event: on_progress(job_id, **event),
+            on_status=lambda status: on_status(job_id, status),
+            on_error=lambda error: on_error(job_id, error),
+            on_clips=lambda clips: on_clips(job_id, clips),
+        )
+    except Exception as exc:
+        import traceback
+
+        tb = traceback.format_exc()
+        print(f"[run_job] fatal error before/outside pipeline_steps.run(): {tb}", flush=True)
+        on_error(job_id, f"{type(exc).__name__}: {exc}")
+        on_status(job_id, "failed")
+        raise
 
 
 if __name__ == "__main__":
