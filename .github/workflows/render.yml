@@ -39,7 +39,7 @@ jobs:
           YTDLP_COOKIES_B64: ${{ secrets.YTDLP_COOKIES_B64 }}
         run: |
           if [ -n "$YTDLP_COOKIES_B64" ]; then
-            echo "$YTDLP_COOKIES_B64" | base64 -d > "$RUNNER_TEMP/youtube_cookies.txt"
+            echo "$YTDLP_COOKIES_B64" | base64 -d > "${{ github.workspace }}/youtube_cookies.txt"
           fi
 
       - name: Run rendering pipeline
@@ -50,12 +50,12 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YTDLP_COOKIES_BROWSER: ""
-          YTDLP_COOKIES_FILE: ${{ env.RUNNER_TEMP }}/youtube_cookies.txt
+          YTDLP_COOKIES_FILE: ${{ github.workspace }}/youtube_cookies.txt
         run: python scripts/run_job.py "${{ inputs.job_id }}" '${{ inputs.payload }}'
 
       - name: Remove decoded cookies file
         if: always()
-        run: rm -f "$RUNNER_TEMP/youtube_cookies.txt"
+        run: rm -f "${{ github.workspace }}/youtube_cookies.txt"
 
       - name: Upload rendered clips to R2
         if: always()
