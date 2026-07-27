@@ -26,7 +26,8 @@ jobs:
       - name: Install ffmpeg and OpenCV/MediaPipe system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg libgles2 libegl1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
 
       - name: Install Deno (yt-dlp JS challenge solver)
         uses: denoland/setup-deno@v2
