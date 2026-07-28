@@ -187,8 +187,17 @@ def buat_file_ass(
                                     text_parts.append(
                                         f"{{\\c&H00FFFF&}}{x['word']}{{\\c&HFFFFFF&}}"
                                     )
-                                else:
+                                elif j < i:
                                     text_parts.append(x["word"])
+                                else:
+                                    # Words not spoken yet in this chunk --
+                                    # without this, the karaoke branch showed
+                                    # the entire 5-word chunk from the first
+                                    # word's timestamp, so words 2-5 were
+                                    # visible before the speaker said them.
+                                    text_parts.append(
+                                        f"{{\\alpha&HFF&}}{x['word']}{{\\alpha&H00&}}"
+                                    )
                             else:
                                 if j <= i:
                                     text_parts.append(x["word"])
@@ -357,7 +366,13 @@ def buat_file_ass(
                     if pakai_karaoke:
                         pos_tag = f"\\pos({int(word_x)},{int(line_y)})"
                         c_tag = "\\c&HFFFFFF&"
-                        anim_tag = f"\\fscx{target_scale}\\fscy{target_scale}\\t({t_start},{t_start},\\c&H00FFFF&)\\t({w_end_ms},{w_end_ms},\\c&HFFFFFF&)"
+                        # \alpha&HFF& keeps the word hidden until its own
+                        # t_start, same as every other animation style below --
+                        # without this, every word's Dialogue event spans the
+                        # WHOLE segment (seg_s to seg_e) with no hide, so words
+                        # not yet spoken were fully visible from the segment's
+                        # first word onward.
+                        anim_tag = f"\\alpha&HFF&\\fscx{target_scale}\\fscy{target_scale}\\t({t_start},{t_start},\\alpha&H00&\\c&H00FFFF&)\\t({w_end_ms},{w_end_ms},\\c&HFFFFFF&)"
                     else:
                         if w_anim == "stagger_up":
                             y_start = int(line_y + 30)

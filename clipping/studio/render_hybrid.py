@@ -241,10 +241,7 @@ def buat_video_hybrid(
         cam_cy = _st.median(initial_cys) if initial_cys else raw_data[0]["cy"]
         
         deadzone_px = crop_w * DEADZONE_RATIO
-        
-        # Consistent aggressive snapping for wide-to-tight camera cuts in standard clips
-        temp_snap = SNAP_THRESHOLD if SNAP_THRESHOLD < 0.1 else 0.08
-        snap_px = width * temp_snap
+        snap_px = width * SNAP_THRESHOLD
 
         for d in raw_data:
             face_cx = d["cx"]
