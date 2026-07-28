@@ -396,9 +396,18 @@ def transcribe_video(
     model_size: str = "large-v3",
     device: str = "cuda",
     compute_type: str = "float16",
+    progress_callback=None,
 ) -> tuple[str, list[dict]]:
     """
     Transcribe *video_path* using Faster-Whisper.
+
+    Parameters
+    ----------
+    progress_callback : callable, optional
+        Called as ``progress_callback(transcribed_seconds=, total_seconds=)``
+        each time a new segment arrives, so callers can report "N/M min
+        transcribed" instead of a single start/end event — faster-whisper
+        streams segments lazily with no other progress signal mid-decode.
 
     Returns
     -------
@@ -449,10 +458,19 @@ def transcribe_video(
         bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.0f}/{total:.0f}s [{elapsed}<{remaining}]",
     )
 
+    last_report = {"t": 0.0}
+
     for segment in segments:
         # Clamp agar floating-point drift melewati durasi tidak overshoot.
-        progress.update(min(segment.end, total_dur) - progress.n)
+        segment_end = min(segment.end, total_dur)
+        progress.update(segment_end - progress.n)
         transkrip_lengkap += f"[{segment.start:.1f} - {segment.end:.1f}] {segment.text}\n"
+
+        if progress_callback is not None:
+            now = time.monotonic()
+            if now - last_report["t"] >= 2.0:
+                last_report["t"] = now
+                progress_callback(transcribed_seconds=segment_end, total_seconds=total_dur)
 
         if segment.words:
             chunk_words: list[dict] = []
@@ -478,6 +496,8 @@ def transcribe_video(
 
     progress.update(total_dur - progress.n)  # snap ke 100% saat selesai
     progress.close()
+    if progress_callback is not None:
+        progress_callback(transcribed_seconds=total_dur, total_seconds=total_dur)
     return transkrip_lengkap, data_segmen
 
 

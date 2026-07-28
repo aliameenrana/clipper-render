@@ -36,6 +36,7 @@ def _load_studio_internal_module(file_name: str, module_alias: str):
 _helpers = _load_studio_internal_module("helpers.py", "clipping_studio_helpers")
 _ffmpeg_utils = _load_studio_internal_module("ffmpeg_utils.py", "clipping_studio_ffmpeg_utils")
 _core = _load_studio_internal_module("core.py", "clipping_studio_core")
+_motion_check = _load_studio_internal_module("motion_check.py", "clipping_studio_motion_check")
 
 format_seconds = _helpers.format_seconds
 escape_ffmpeg_filter_value = _helpers.escape_ffmpeg_filter_value
@@ -69,3 +70,6 @@ buat_video_camera_switch = _core.buat_video_camera_switch
 _get_render_dims = _core._get_render_dims
 _is_vertical_ratio = _core._is_vertical_ratio
 proses_klip = _core.proses_klip
+
+check_clip_motion = _motion_check.check_clip_motion
+filter_static_clips = _motion_check.filter_static_clips

@@ -108,7 +108,7 @@ def run(
                         download_eta=eta,
                     )
 
-                engine.download_video(
+                video_metadata = engine.download_video(
                     cfg.url_youtube,
                     cfg.file_video_asli,
                     getattr(cfg, "use_dlp_subs", False),
@@ -122,6 +122,9 @@ def run(
                     total_steps=TOTAL_STEPS,
                     message="Video downloaded successfully.",
                     percent=14.0,
+                    video_title=video_metadata.get("title"),
+                    video_channel=video_metadata.get("channel"),
+                    video_category=video_metadata.get("category"),
                 )
 
         # --- Step 2: Transcribe ---
@@ -146,12 +149,28 @@ def run(
             )
 
         if not transkrip_lengkap or not data_segmen:
+            def _on_transcribe_progress(transcribed_seconds=0.0, total_seconds=0.0):
+                pct = min(1.0, transcribed_seconds / total_seconds) if total_seconds else 0.0
+                on_progress(
+                    step="transcribe",
+                    step_number=2,
+                    total_steps=TOTAL_STEPS,
+                    message=(
+                        f"Transcribing... {transcribed_seconds / 60:.1f}/"
+                        f"{total_seconds / 60:.1f} min"
+                    ),
+                    percent=15.0 + pct * 20.0,
+                    transcribe_seconds=transcribed_seconds,
+                    transcribe_total_seconds=total_seconds,
+                )
+
             transkrip_lengkap, data_segmen = engine.transcribe_video(
                 cfg.file_video_asli,
                 max_words_per_subtitle=cfg.max_kata_per_subtitle,
                 model_size=cfg.whisper_model,
                 device=cfg.whisper_device,
                 compute_type=cfg.whisper_compute_type,
+                progress_callback=_on_transcribe_progress,
             )
 
         on_progress(
@@ -191,23 +210,41 @@ def run(
         )
 
         # --- Step 4: Metadata ---
-        from clipping import metadata
+        from clipping import metadata, studio
 
         hasil_json = metadata.normalize_and_validate(hasil_json)
         metadata_path = os.path.join(cfg.outputs_dir, "metadata_preview.json")
         metadata.save_metadata_preview(hasil_json, path=metadata_path)
 
+        # Gemini selects candidates from the transcript alone -- it can't
+        # see whether the footage itself is moving. Sample frames across
+        # each candidate's range so a clip that reads well on audio but is
+        # a paused/frozen screen on video doesn't get rendered ahead of a
+        # genuinely dynamic one. Never dropped outright (a false positive
+        # would silently lose a good clip) -- just sunk to the bottom.
+        hasil_json = studio.filter_static_clips(cfg.file_video_asli, hasil_json)
+        static_count = sum(1 for c in hasil_json if c.get("motion_check", {}).get("is_static"))
+        hasil_json.sort(key=lambda c: c.get("motion_check", {}).get("is_static", False))
+        # Re-number rank to match the new order -- the render loop later
+        # sorts by rank, so the reorder above would otherwise be undone.
+        for i, clip in enumerate(hasil_json):
+            clip["rank"] = i + 1
+
         on_progress(
             step="metadata",
             step_number=4,
             total_steps=TOTAL_STEPS,
-            message="Metadata normalized.",
+            message=(
+                f"Metadata normalized ({static_count} static clip(s) flagged)."
+                if static_count
+                else "Metadata normalized."
+            ),
             percent=55.0,
         )
 
         # --- Step 5: Diarization (optional) ---
         diarization_data = None
-        from clipping import studio, diarization as diarization_mod
+        from clipping import diarization as diarization_mod
 
         if (
             (getattr(cfg, "use_split_screen", False) and cfg.split_trigger == "diarization")
@@ -324,6 +361,7 @@ def run(
             json.dump(render_manifest, f, ensure_ascii=False, indent=2)
 
         # --- Build clip details for the job store ---
+        motion_by_rank = {c["rank"]: c.get("motion_check") for c in hasil_json}
         clips: list[dict] = []
         for entry in render_manifest:
             filename = os.path.basename(entry.get("output_file") or entry.get("video_path") or "")
@@ -342,6 +380,7 @@ def run(
                     "thumbnail_url": (
                         f"/api/outputs/{job_id}/{thumbnail_filename}" if thumbnail_filename else None
                     ),
+                    "motion_check": motion_by_rank.get(entry.get("rank", 0)),
                     "metadata": entry,
                 }
             )
