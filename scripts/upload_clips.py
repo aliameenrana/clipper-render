@@ -67,6 +67,16 @@ def main() -> None:
 
         clip["download_url"] = f"{R2_PUBLIC_BASE_URL}/{r2_key}"
 
+        thumbnail_path = (clip.get("metadata") or {}).get("thumbnail_path")
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            thumbnail_filename = os.path.basename(thumbnail_path)
+            thumbnail_key = f"{job_id}/{thumbnail_filename}"
+            print(f"[upload_clips] uploading {thumbnail_filename} -> r2://{R2_BUCKET}/{thumbnail_key}", flush=True)
+            client.upload_file(
+                thumbnail_path, R2_BUCKET, thumbnail_key, ExtraArgs={"ContentType": "image/jpeg"}
+            )
+            clip["thumbnail_url"] = f"{R2_PUBLIC_BASE_URL}/{thumbnail_key}"
+
     # Re-report the final clip list with real R2 URLs, replacing the
     # placeholder download_urls sent by run_job.py's on_clips callback.
     res = requests.post(

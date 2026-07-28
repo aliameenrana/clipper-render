@@ -140,7 +140,7 @@ def download_video(
     download_source_height: str | int = "max",
     source_platform: str = "youtube",
     progress_callback=None,
-) -> None:
+) -> dict:
     """
     Download a video to *output_path* with configurable source height.
 
@@ -152,6 +152,13 @@ def download_video(
     progress_callback : callable, optional
         Called as ``progress_callback(downloaded_bytes=, total_bytes=,
         speed=, eta=)`` on every yt-dlp progress tick.
+
+    Returns
+    -------
+    dict
+        ``{"title": str | None, "channel": str | None, "category": str | None}``
+        pulled from yt-dlp's metadata (empty values for gdrive, which has
+        no such metadata).
     """
     platform_label = _PLATFORM_LABELS.get(source_platform, source_platform)
     uses_youtube_format = source_platform == "youtube"
@@ -170,7 +177,7 @@ def download_video(
                 f"❌ Download dari Google Drive gagal — file tidak ditemukan di {output_path}"
             )
         print(f"      ✅ Video berhasil didownload dari Google Drive.", flush=True)
-        return
+        return {"title": None, "channel": None, "category": None}
 
     hook = _make_ydl_progress_hook(progress_callback)
 
@@ -241,6 +248,7 @@ def download_video(
         print(f"      ℹ️ {platform_label} tidak menyediakan subtitle otomatis. Whisper akan digunakan.")
 
     # Jalankan download video terpisah dari urusan subtitle
+    metadata = {"title": None, "channel": None, "category": None}
     with YoutubeDL(ydl_opts) as ydl:
         # Extra step to verify resolution before downloading
         try:
@@ -248,6 +256,10 @@ def download_video(
             best_h = info.get("height", "unknown")
             v_codec = info.get("vcodec", "unknown")
             print(f"      ✅ Mendownload: {best_h}p (Codec: {v_codec})", flush=True)
+            metadata["title"] = info.get("title")
+            metadata["channel"] = info.get("channel") or info.get("uploader")
+            categories = info.get("categories") or []
+            metadata["category"] = categories[0] if categories else None
         except Exception as e:
             print(f"      ⚠️ Gagal mengecek info detail: {e}", flush=True)
 
@@ -259,6 +271,8 @@ def download_video(
             f"❌ Download dari {platform_label} gagal — file video tidak ditemukan di {output_path}.\n"
             "      Pastikan URL valid dan bisa diakses secara publik."
         )
+
+    return metadata
 
 
 # ==============================================================================

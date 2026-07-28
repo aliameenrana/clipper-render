@@ -327,6 +327,7 @@ def run(
         clips: list[dict] = []
         for entry in render_manifest:
             filename = os.path.basename(entry.get("output_file") or entry.get("video_path") or "")
+            thumbnail_filename = os.path.basename(entry.get("thumbnail_path") or "")
             clips.append(
                 {
                     "rank": entry.get("rank", 0),
@@ -338,6 +339,9 @@ def run(
                     "start_time": entry.get("start_time"),
                     "end_time": entry.get("end_time"),
                     "download_url": f"/api/outputs/{job_id}/{filename}",
+                    "thumbnail_url": (
+                        f"/api/outputs/{job_id}/{thumbnail_filename}" if thumbnail_filename else None
+                    ),
                     "metadata": entry,
                 }
             )
