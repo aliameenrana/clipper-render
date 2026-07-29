@@ -160,6 +160,16 @@ def buat_file_ass(
         path = os.path.join(font_dir, nama_file)
         return os.path.exists(path) and os.path.getsize(path) > min_valid_size
 
+    # Gap-handling for word-display end time: if the next word starts soon
+    # enough after this one ends, treat it as continuous speech and hold
+    # this word's caption up to bridge the gap (avoids a 1-frame flicker
+    # from rounding/frame-boundary jitter on fast, back-to-back speech).
+    # If the gap is a real pause, cap display at this word's own end (plus
+    # a small buffer) instead of bleeding the caption through the silence.
+    CONTINUOUS_GAP_THRESHOLD_S = 0.20
+    PAUSE_END_BUFFER_S = 0.09
+    MIN_WORD_DISPLAY_S = 0.25
+
     if not pakai_advanced:
         with open(nama_file_ass, "w", encoding="utf-8") as f:
             f.write(header)
@@ -171,13 +181,26 @@ def buat_file_ass(
 
                 for i, w in enumerate(seg["words"]):
                     w_s = max(0, w["start"] - start_clip)
+                    w_own_end = w["end"] - start_clip
                     if i < len(seg["words"]) - 1:
-                        w_e = min(
-                            end_clip - start_clip,
-                            seg["words"][i + 1]["start"] - start_clip,
-                        )
+                        next_w_start = seg["words"][i + 1]["start"] - start_clip
+                        gap = next_w_start - w_own_end
+                        if gap < CONTINUOUS_GAP_THRESHOLD_S:
+                            w_e = next_w_start
+                        else:
+                            # Real pause: cut shortly after this word ends,
+                            # never bleeding past the buffer even though
+                            # the next word is still a while off.
+                            w_e = min(w_own_end + PAUSE_END_BUFFER_S, next_w_start)
+                        # Minimum display floor, but never past where the
+                        # next word's own caption is about to take over --
+                        # otherwise a very short word right before a real
+                        # pause could re-extend into that silence anyway.
+                        w_e = min(max(w_e, w_s + MIN_WORD_DISPLAY_S), next_w_start)
                     else:
-                        w_e = min(end_clip - start_clip, w["end"] - start_clip)
+                        w_e = w_own_end
+                        w_e = max(w_e, w_s + MIN_WORD_DISPLAY_S)
+                    w_e = min(w_e, end_clip - start_clip)
 
                     if w_s < w_e:
                         text_parts = []
