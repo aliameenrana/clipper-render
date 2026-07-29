@@ -173,6 +173,15 @@ def run(
                 progress_callback=_on_transcribe_progress,
             )
 
+        # Caption fonts (Montserrat, Anton, Inter, Lora, Roboto, Bebas Neue)
+        # have no Devanagari/Arabic/etc. glyph coverage -- burning in
+        # native-script text renders every character as an empty tofu box.
+        # Romanize just the caption word text (data_segmen); the AI
+        # analysis step below still sees the original transkrip_lengkap,
+        # since Gemini reads native script fine and it's the higher-
+        # fidelity signal for picking highlight moments.
+        data_segmen = engine.romanize_segments(data_segmen, cfg)
+
         on_progress(
             step="transcribe",
             step_number=2,

@@ -205,13 +205,10 @@ def download_video(
         }
 
     # Cookies to bypass YouTube's "Sign in to confirm you're not a bot"
-    # gating. A cookie FILE takes priority (the only option on a headless
-    # CI runner with no installed browser, e.g. GitHub Actions -- see
-    # YTDLP_COOKIES_FILE in .github/workflows/render.yml). Falls back to
-    # reading a local browser profile (only meaningful on a dev machine
-    # that actually has one, e.g. this repo's local FastAPI dev setup) if
-    # no cookie file is configured. Set YTDLP_COOKIES_BROWSER="" to disable
-    # the browser fallback entirely.
+    # gating. A cookie FILE takes priority (used on headless CI runners
+    # with no installed browser, e.g. GitHub Actions). Falls back to
+    # reading a local browser profile if no cookie file is configured.
+    # Set YTDLP_COOKIES_BROWSER="" to disable the browser fallback.
     cookies_file = os.environ.get("YTDLP_COOKIES_FILE", "")
     cookies_browser = os.environ.get("YTDLP_COOKIES_BROWSER", "chrome")
     if cookies_file and os.path.exists(cookies_file):
@@ -499,6 +496,111 @@ def transcribe_video(
     if progress_callback is not None:
         progress_callback(transcribed_seconds=total_dur, total_seconds=total_dur)
     return transkrip_lengkap, data_segmen
+
+
+def _needs_romanization(text: str, threshold: float = 0.3) -> bool:
+    """
+    True if more than *threshold* of the alphabetic characters in *text*
+    are non-Latin script (Devanagari, Arabic, etc.).
+
+    Caption fonts (Montserrat, Anton, Inter, Lora, Roboto, Bebas Neue) have
+    no glyph coverage for these scripts -- burning them in as-is renders
+    every character as an empty tofu box. Checking actual character script
+    (not the Whisper-detected language code) catches code-switched
+    transcripts too, e.g. a mostly-English clip with a few Hindi words.
+    """
+    import unicodedata
+
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return False
+    non_latin = sum(1 for c in letters if "LATIN" not in unicodedata.name(c, ""))
+    return (non_latin / len(letters)) > threshold
+
+
+def romanize_segments(data_segmen: list[dict], cfg) -> list[dict]:
+    """
+    Replace non-Latin-script word text in *data_segmen* with a romanized
+    (Roman Hindi/Roman Urdu/etc.) transliteration, so captions render with
+    the existing Latin-only fonts instead of tofu boxes. Word-level
+    timestamps are never touched -- only the ``word`` text of each entry
+    may be replaced.
+
+    Segment-level batching (not per-word) is intentional: transliterating
+    a single Devanagari/Arabic word in isolation is genuinely ambiguous
+    (schwa deletion, vowel elision) without surrounding context, so each
+    chunk's full text is sent to Gemini together and the result is
+    re-split on whitespace and zipped back against that chunk's existing
+    per-word timestamps by position. If Gemini's word count for a chunk
+    doesn't match the original (it merged/split a word), that chunk is
+    left in its original script rather than guessing at a re-alignment --
+    still renders as tofu for that one chunk, but never mis-times a word.
+    """
+    full_text = "\n".join(
+        " ".join(w["word"] for w in seg["words"]) for seg in data_segmen
+    )
+    if not _needs_romanization(full_text):
+        return data_segmen
+
+    import google.genai as genai
+    from google.genai import types
+
+    print("      🔤 Non-Latin script detected — romanizing captions via Gemini...", flush=True)
+
+    numbered_lines = "\n".join(
+        f"{i}: {' '.join(w['word'] for w in seg['words'])}"
+        for i, seg in enumerate(data_segmen)
+    )
+    prompt = (
+        "The following are numbered lines from a video transcript, possibly in "
+        "Hindi, Urdu, or another non-Latin-script language, sometimes mixed "
+        "with English.\n\n"
+        "Rewrite EVERY line in informal ROMANIZED script (the way people "
+        "actually type it casually online — e.g. Hindi 'क्या कर रहे हो' becomes "
+        "'kya kar rahe ho', Urdu similarly) — NOT English translation, NOT "
+        "formal/academic transliteration with diacritics. Keep any words that "
+        "are already in English or Latin script exactly as they are. "
+        "Preserve the exact same number of words per line as the input line — "
+        "do not merge, split, add, or remove words, since each word's timing "
+        "depends on its position.\n\n"
+        "Return ONLY a JSON array of strings, one per input line, in the same "
+        "order, same count as the input lines.\n\n"
+        f"{numbered_lines}"
+    )
+
+    try:
+        client = genai.Client(api_key=cfg.api_key_gemini)
+        response = client.models.generate_content(
+            model=getattr(cfg, "gemini_model", "gemini-3-flash-preview"),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema={"type": "ARRAY", "items": {"type": "STRING"}},
+            ),
+        )
+        romanized_lines = json.loads(response.text)
+    except Exception as e:
+        print(f"      ⚠️ Romanization failed ({e}) — captions will stay in original script.", flush=True)
+        return data_segmen
+
+    if len(romanized_lines) != len(data_segmen):
+        print(
+            f"      ⚠️ Romanization returned {len(romanized_lines)} lines, "
+            f"expected {len(data_segmen)} — skipping to avoid mis-timed words.",
+            flush=True,
+        )
+        return data_segmen
+
+    for seg, romanized_line in zip(data_segmen, romanized_lines):
+        new_words = romanized_line.split()
+        if len(new_words) != len(seg["words"]):
+            # This chunk's word count didn't survive romanization intact --
+            # leave it in original script rather than guess at realignment.
+            continue
+        for w, new_text in zip(seg["words"], new_words):
+            w["word"] = new_text
+
+    return data_segmen
 
 
 # ==============================================================================
