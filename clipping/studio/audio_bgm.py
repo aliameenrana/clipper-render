@@ -33,7 +33,10 @@ def get_local_bgm_file(mood, bgm_dir):
     return os.path.abspath(os.path.join(mood_dir, selected_file))
 
 
-def build_bgm_filter(bgm_mode, bgm_base_volume, audio_input_voc="[1:a]", audio_input_bgm="[2:a]"):
+def build_bgm_filter(
+    bgm_mode, bgm_base_volume, audio_input_voc="[1:a]", audio_input_bgm="[2:a]",
+    fade_in_sec=0.0, fade_out_sec=0.0, clip_duration=None,
+):
     """
     Build the FFmpeg filter_complex string for BGM mixing.
 
@@ -42,12 +45,28 @@ def build_bgm_filter(bgm_mode, bgm_base_volume, audio_input_voc="[1:a]", audio_i
         bgm_base_volume (float): Base volume level for BGM (e.g. 0.25).
         audio_input_voc (str): FFmpeg stream label for vocal audio input.
         audio_input_bgm (str): FFmpeg stream label for BGM audio input.
+        fade_in_sec (float): BGM fade-in duration in seconds, 0 to disable.
+        fade_out_sec (float): BGM fade-out duration in seconds, 0 to disable.
+        clip_duration (float): Total clip duration in seconds; required for fade_out_sec > 0
+            since afade's fade-out start point is measured from the beginning of the stream.
 
     Returns:
         str: The filter_complex string for FFmpeg.
     """
     voc_format = f"{audio_input_voc}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=1.2[voc]"
-    bgm_format = f"{audio_input_bgm}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_base_volume}[bgm]"
+
+    bgm_fade_parts = []
+    if fade_in_sec > 0:
+        bgm_fade_parts.append(f"afade=t=in:st=0:d={fade_in_sec}")
+    if fade_out_sec > 0 and clip_duration:
+        fade_out_start = max(0.0, clip_duration - fade_out_sec)
+        bgm_fade_parts.append(f"afade=t=out:st={fade_out_start}:d={fade_out_sec}")
+    bgm_fade = ("," + ",".join(bgm_fade_parts)) if bgm_fade_parts else ""
+
+    bgm_format = (
+        f"{audio_input_bgm}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+        f"volume={bgm_base_volume}{bgm_fade}[bgm]"
+    )
 
     if bgm_mode == "background":
         # Simple constant-volume mix — no sidechain, BGM stays at bgm_base_volume throughout

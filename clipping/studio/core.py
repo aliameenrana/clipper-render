@@ -571,7 +571,10 @@ def proses_klip(
                 bgm_mode = getattr(cfg, "bgm_mode", "ducking")
                 filter_complex_seg = build_bgm_filter(
                     bgm_mode, cfg.bgm_base_volume,
-                    audio_input_voc="[0:a]", audio_input_bgm="[1:a]"
+                    audio_input_voc="[0:a]", audio_input_bgm="[1:a]",
+                    fade_in_sec=getattr(cfg, "bgm_fade_in_sec", 0.0),
+                    fade_out_sec=getattr(cfg, "bgm_fade_out_sec", 0.0),
+                    clip_duration=seg_total_dur,
                 )
                 cmd_bgm_seg = [
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
@@ -701,7 +704,10 @@ def proses_klip(
                     bgm_mode = getattr(cfg, "bgm_mode", "ducking")
                     audio_filter = build_bgm_filter(
                         bgm_mode, cfg.bgm_base_volume,
-                        audio_input_voc="[1:a]", audio_input_bgm=f"[{input_idx_bgm}:a]"
+                        audio_input_voc="[1:a]", audio_input_bgm=f"[{input_idx_bgm}:a]",
+                        fade_in_sec=getattr(cfg, "bgm_fade_in_sec", 0.0),
+                        fade_out_sec=getattr(cfg, "bgm_fade_out_sec", 0.0),
+                        clip_duration=m_end - m_start,
                     )
                     filter_complex = f"[0:v]{v_filter}[v_out]; {audio_filter}"
                     

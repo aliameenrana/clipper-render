@@ -139,7 +139,10 @@ def buat_file_ass(
     else:
         align = cfg.ass_align_916 if _is_vertical_ratio(rasio) else cfg.ass_align_169
         margin_v = int((cfg.ass_margin_916 if _is_vertical_ratio(rasio) else cfg.ass_margin_169) * scale_factor)
-    font_sz = int((cfg.ass_font_916 if _is_vertical_ratio(rasio) else cfg.ass_font_169) * scale_factor)
+    base_font_sz = getattr(cfg, "caption_font_size_override", None) or (
+        cfg.ass_font_916 if _is_vertical_ratio(rasio) else cfg.ass_font_169
+    )
+    font_sz = int(base_font_sz * scale_factor)
     margin_lr = int((60 if _is_vertical_ratio(rasio) else 40) * scale_factor)
 
     header = (

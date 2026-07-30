@@ -29,12 +29,22 @@ from clipping.config import (
     URL_FONT_THUMBNAIL,
     URL_GLITCH_VIDEO,
     URL_MEDIAPIPE_MODEL,
-    VIDEO_PRESET,
-    VIDEO_QUALITY_CQ,
-    VIDEO_QUALITY_CRF,
     VIDEO_SCALE_ALGO,
     WARNA_KATA_KHUSUS,
 )
+
+
+def _hex_to_ass_bgr(hex_color: str | None) -> str | None:
+    """
+    Convert a standard "#RRGGBB" or "RRGGBB" hex color into ASS's native
+    "&HBBGGRR&" format (reversed byte order). Returns None if hex_color is
+    None/empty, so callers can `or`-fall-back to a preset default cleanly.
+    """
+    if not hex_color:
+        return None
+    hex_color = hex_color.lstrip("#")
+    r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+    return f"&H{b}{g}{r}&".upper()
 
 
 def build_config_from_payload(
@@ -101,6 +111,34 @@ def build_config_from_payload(
             os.path.join(outputs_dir, "video_asli.mp4")
         )
 
+    # caption_style_mode is a single frontend-facing choice replacing two
+    # independent booleans (use_karaoke_effect/use_advanced_text) that
+    # could silently conflict -- karaoke mode ignores animation styling
+    # entirely regardless of use_advanced_text, so exposing both as
+    # separate toggles let a user pick a combination that did nothing.
+    # An explicit use_karaoke_effect/advanced_text in the payload still
+    # wins if present, so nothing already sending those directly breaks.
+    caption_style_mode = payload.get("caption_style_mode", "karaoke")
+    default_use_karaoke = caption_style_mode == "karaoke"
+    default_use_advanced = caption_style_mode == "animated"
+
+    # quality_preset wraps the underlying encoder knobs so the frontend
+    # doesn't need to expose raw CRF/CQ/preset/bitrate. Any of those can
+    # still be set directly in the payload, which takes precedence.
+    _QUALITY_PRESETS = {
+        "standard": {"video_crf": 23, "video_cq": 26, "video_preset": "fast", "video_bitrate": "auto"},
+        "high": {"video_crf": 20, "video_cq": 22, "video_preset": "medium", "video_bitrate": "auto"},
+        "max": {"video_crf": 17, "video_cq": 18, "video_preset": "slow", "video_bitrate": "auto"},
+    }
+    quality_defaults = _QUALITY_PRESETS.get(payload.get("quality_preset", "standard"), _QUALITY_PRESETS["standard"])
+
+    # caption_position maps to a (align, margin_v) pair. Only the vertical
+    # position varies for now -- alignment stays whatever the ratio's
+    # existing ASS_ALIGN_* constant is, margin shifts up for "top"/"middle".
+    _CAPTION_POSITION_MARGIN_MULTIPLIER = {"bottom": 1.0, "middle": 2.2, "top": 4.0}
+    caption_position = payload.get("caption_position", "bottom")
+    margin_multiplier = _CAPTION_POSITION_MARGIN_MULTIPLIER.get(caption_position, 1.0)
+
     cfg = SimpleNamespace(
         # Paths
         base_dir=base_dir,
@@ -131,13 +169,25 @@ def build_config_from_payload(
         pilihan_rasio=payload.get("ratio", "9:16"),
         download_source_height=source_height,
         render_output_height=render_height,
+        # Mode: "auto" (AI picks highlights) or "manual" (user-specified
+        # exact range, skips the AI-analysis stage entirely -- see
+        # pipeline_steps.py's Step 3 branch).
+        mode=payload.get("mode", "auto"),
+        manual_start_time=payload.get("manual_start_time"),
+        manual_end_time=payload.get("manual_end_time"),
         # Konten & Hook
         max_kata_per_subtitle=payload.get("words_per_sub", 5),
         durasi_hook=payload.get("hook_duration", 3),
-        hook_source=None,
-        hook_source_start=0.0,
-        # Hook V2 & Segment Trimming
-        hook_v2=payload.get("hook_v2", False),
+        # Was hardcoded to None/0.0 regardless of payload -- a genuinely
+        # dead feature path, not an intentional web-unsupported gap (unlike
+        # story_mode below, which is deliberately unsupported).
+        hook_source=payload.get("hook_source"),
+        hook_source_start=payload.get("hook_source_start", 0.0),
+        # Hook V2 & Segment Trimming. hook_style is the frontend-friendly
+        # wrapper ("single"/"multi_flash"); an explicit hook_v2 boolean in
+        # the payload still takes precedence if present, so anything
+        # already sending hook_v2 directly keeps working unchanged.
+        hook_v2=payload.get("hook_v2", payload.get("hook_style", "single") == "multi_flash"),
         hook_v2_items=payload.get("hook_v2_items", 3),
         hook_v2_style=payload.get("hook_v2_style", "controversial_fast_glitch"),
         white_flash_duration=payload.get("white_flash_duration", 0.12),
@@ -146,7 +196,7 @@ def build_config_from_payload(
         use_broll=payload.get("use_broll", True),
         use_hook_glitch=payload.get("use_hook_glitch", True),
         use_auto_bgm=payload.get("use_auto_bgm", True),
-        use_karaoke_effect=payload.get("use_karaoke_effect", True),
+        use_karaoke_effect=payload.get("use_karaoke_effect", default_use_karaoke),
         use_split_screen=payload.get("use_split_screen", False),
         use_dynamic_split=payload.get("use_dynamic_split", False),
         split_trigger=payload.get("split_trigger", "diarization"),
@@ -162,25 +212,37 @@ def build_config_from_payload(
         no_subs=payload.get("no_subs", False),
         gaya_font_aktif=payload.get("font_style", "HORMOZI"),
         daftar_font=DAFTAR_FONT,
-        use_advanced_text=payload.get("advanced_text", False),
+        use_advanced_text=payload.get("advanced_text", default_use_advanced),
         use_advanced_text_on_hook=payload.get("advanced_text_hook", False),
-        # ASS position values
+        # None = use the preset's own base size; only overridden if the
+        # caller actually sent a value.
+        caption_font_size_override=payload.get("caption_font_size"),
+        # ASS position values -- margin scaled by the caption_position
+        # multiplier computed above (bottom=1x i.e. unchanged, middle/top
+        # push the margin up so captions sit higher in frame).
         ass_align_916=ASS_ALIGN_916,
-        ass_margin_916=ASS_MARGIN_916,
+        ass_margin_916=int(ASS_MARGIN_916 * margin_multiplier),
         ass_font_916=ASS_FONT_916,
         scale_kata_khusus_916=SCALE_KATA_KHUSUS_916,
         ass_align_169=ASS_ALIGN_169,
-        ass_margin_169=ASS_MARGIN_169,
+        ass_margin_169=int(ASS_MARGIN_169 * margin_multiplier),
         ass_font_169=ASS_FONT_169,
         scale_kata_khusus_169=SCALE_KATA_KHUSUS_169,
-        warna_kata_khusus=WARNA_KATA_KHUSUS,
+        # emphasis_color_hex ("FFD700") -> ASS's &HBBGGRR& format (reversed
+        # byte order from standard RGB hex, matching WARNA_KATA_KHUSUS's
+        # own format) if the caller sent one, else the preset default.
+        warna_kata_khusus=_hex_to_ass_bgr(payload.get("emphasis_color_hex")) or WARNA_KATA_KHUSUS,
         # Asset URLs
         url_font_thumbnail=URL_FONT_THUMBNAIL,
         url_glitch_video=URL_GLITCH_VIDEO,
         url_mediapipe_model=URL_MEDIAPIPE_MODEL,
-        # BGM
-        bgm_base_volume=BGM_BASE_VOLUME,
+        # BGM. bgm_mode was already read here before this round -- it just
+        # wasn't reachable via the API because JobCreateRequest never
+        # declared the field, so it silently no-op'd for any web caller.
+        bgm_base_volume=payload.get("bgm_volume", BGM_BASE_VOLUME),
         bgm_mode=payload.get("bgm_mode", "ducking"),
+        bgm_fade_in_sec=payload.get("bgm_fade_in_sec", 0.0),
+        bgm_fade_out_sec=payload.get("bgm_fade_out_sec", 0.0),
         # Whisper
         use_dlp_subs=payload.get("use_dlp_subs", False),
         whisper_model=payload.get("whisper_model", "large-v3"),
@@ -203,11 +265,13 @@ def build_config_from_payload(
         track_smooth_window=12,
         scene_cut_threshold=18,
         track_iou_threshold=0.2,
-        video_quality_cq=payload.get("video_cq", VIDEO_QUALITY_CQ),
-        video_quality_crf=payload.get("video_crf", VIDEO_QUALITY_CRF),
-        video_bitrate=payload.get("video_bitrate", "auto"),
+        # quality_preset supplies the default; an explicit video_cq/crf/
+        # preset/bitrate in the payload still overrides it directly.
+        video_quality_cq=payload.get("video_cq", quality_defaults["video_cq"]),
+        video_quality_crf=payload.get("video_crf", quality_defaults["video_crf"]),
+        video_bitrate=payload.get("video_bitrate", quality_defaults["video_bitrate"]),
         video_sharpen=payload.get("video_sharpen", False),
-        video_preset=payload.get("video_preset", VIDEO_PRESET),
+        video_preset=payload.get("video_preset", quality_defaults["video_preset"]),
         video_scale_algo=payload.get("video_scale_algo", VIDEO_SCALE_ALGO),
         box_face_detection=False,
         dev_mode=False,

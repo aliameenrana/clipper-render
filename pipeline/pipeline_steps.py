@@ -202,21 +202,46 @@ def run(
 
         gemini_output_path = os.path.join(cfg.outputs_dir, "gemini_response.json")
 
-        if getattr(cfg, "load_gemini_json", False) and os.path.exists(gemini_output_path):
-            with open(gemini_output_path, "r", encoding="utf-8") as f:
-                hasil_json = json.load(f)
+        if getattr(cfg, "mode", "auto") == "manual":
+            # User specified the exact range themselves -- skip AI highlight
+            # detection entirely. metadata.normalize_and_validate (step 4)
+            # already tolerates missing titles/hashtags/scores (soft
+            # defaults, nothing hard-required), so a single-item list with
+            # just the timestamps is enough to flow through the rest of
+            # the pipeline unchanged.
+            hasil_json = [
+                {
+                    "rank": 1,
+                    "start_time": cfg.manual_start_time,
+                    "end_time": cfg.manual_end_time,
+                    "title_indonesia": "",
+                    "title_inggris": "",
+                    "viral_score": 0,
+                }
+            ]
+            on_progress(
+                step="analyze",
+                step_number=3,
+                total_steps=TOTAL_STEPS,
+                message="Using manually specified clip range.",
+                percent=50.0,
+            )
         else:
-            hasil_json = engine.analyze_with_ai(transkrip_lengkap, cfg)
-            with open(gemini_output_path, "w", encoding="utf-8") as f:
-                json.dump(hasil_json, f, indent=4, ensure_ascii=False)
+            if getattr(cfg, "load_gemini_json", False) and os.path.exists(gemini_output_path):
+                with open(gemini_output_path, "r", encoding="utf-8") as f:
+                    hasil_json = json.load(f)
+            else:
+                hasil_json = engine.analyze_with_ai(transkrip_lengkap, cfg)
+                with open(gemini_output_path, "w", encoding="utf-8") as f:
+                    json.dump(hasil_json, f, indent=4, ensure_ascii=False)
 
-        on_progress(
-            step="analyze",
-            step_number=3,
-            total_steps=TOTAL_STEPS,
-            message=f"AI found {len(hasil_json)} candidate clips.",
-            percent=50.0,
-        )
+            on_progress(
+                step="analyze",
+                step_number=3,
+                total_steps=TOTAL_STEPS,
+                message=f"AI found {len(hasil_json)} candidate clips.",
+                percent=50.0,
+            )
 
         # --- Step 4: Metadata ---
         from clipping import metadata, studio
